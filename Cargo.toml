@@ -1,0 +1,27 @@
+[package]
+name = "ihnet"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.98"
+bytes = "1.10.1"
+clap = { version = "4.5.43", features = ["derive", "env"] }
+http = "1.3.1"
+http-body-util = "0.1.3"
+hyper = { version = "1.6.0", features = ["server", "http1"] }
+hyper-util = { version = "0.1.16", features = ["tokio"] }
+iroh = { version = "0.91.1", default-features = false, features = ["discovery-local-network", "discovery-pkarr-dht"] }
+rand = "0.8"
+tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread", "net", "fs"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "z"
+panic = "abort"
+strip = "symbols"
+incremental = false
+debug = false
