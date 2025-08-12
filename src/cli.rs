@@ -1,6 +1,9 @@
 use clap::{Parser, Subcommand};
 use iroh::NodeId;
-use std::{net::SocketAddr, path::PathBuf};
+use std::{
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    path::PathBuf,
+};
 
 #[derive(Parser)]
 #[command(version = env!("CARGO_PKG_VERSION"))]
@@ -11,13 +14,9 @@ pub struct Cli {
     #[arg(long, required = false, env = "RUST_LOG", default_value_t = String::from("ihnet=info"))]
     pub logging: String,
 
-    /// Sets default port to listen on
-    #[arg(long, required = false, default_value_t = 61608)]
-    pub port: u16,
-
-    /// Enables ipv6
-    #[arg(long, required = false, default_value_t = false)]
-    pub ipv6: bool,
+    /// Sets default address to listen on
+    #[arg(long, required = false, default_value_t = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 61608)))]
+    pub address: SocketAddr,
 
     /// Path to save or load identity from
     #[arg(long, required =false, default_value = None)]

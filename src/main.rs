@@ -4,7 +4,7 @@ use cli::{Cli, Mode};
 use hyper::{server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
 use iroh::{Endpoint, NodeId, SecretKey, endpoint::Connection};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::SocketAddr;
 use tokio::{
     fs, io, join,
     net::{TcpListener, TcpStream, UdpSocket},
@@ -89,11 +89,6 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Mode::ForwardUdp { addr } => {
-            let listen_ip = match cli.ipv6 {
-                true => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                false => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            };
-            let listen_addr = SocketAddr::new(listen_ip, cli.port);
             let endpoint = endpoint_builder
                 .alpns(vec![proxy::UDP_ALPN.to_vec()])
                 .bind()
@@ -111,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
 
                     if alpn == proxy::UDP_ALPN {
                         task::spawn(async move {
-                            if let Err(e) = forward_udp(conn, listen_addr, addr).await {
+                            if let Err(e) = forward_udp(conn, cli.address, addr).await {
                                 tracing::warn!("failed to serve connection: {}", e);
                             } else {
                                 tracing::info!("served connection");
@@ -126,11 +121,6 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Mode::Forward { addr } => {
-            let listen_ip = match cli.ipv6 {
-                true => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                false => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            };
-            let listen_addr = SocketAddr::new(listen_ip, cli.port);
             let endpoint = endpoint_builder
                 .alpns(vec![proxy::TCP_ALPN.to_vec(), proxy::UDP_ALPN.to_vec()])
                 .bind()
@@ -156,7 +146,7 @@ async fn main() -> anyhow::Result<()> {
                         });
                     } else if alpn == proxy::UDP_ALPN {
                         task::spawn(async move {
-                            if let Err(e) = forward_udp(conn, listen_addr, addr).await {
+                            if let Err(e) = forward_udp(conn, cli.address, addr).await {
                                 tracing::warn!("failed to serve connection: {}", e);
                             } else {
                                 tracing::info!("served connection");
@@ -171,11 +161,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Mode::ConnectTcp { to } => {
-            let addr = match cli.ipv6 {
-                true => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                false => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            };
-            let tcp_listener = TcpListener::bind(SocketAddr::new(addr, cli.port)).await?;
+            let tcp_listener = TcpListener::bind(cli.address).await?;
             let endpoint = endpoint_builder.bind().await?;
 
             tracing::info!(
@@ -198,11 +184,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Mode::ConnectUdp { to } => {
-            let addr = match cli.ipv6 {
-                true => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                false => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            };
-            let udp_listener = UdpSocket::bind(SocketAddr::new(addr, cli.port)).await?;
+            let udp_listener = UdpSocket::bind(cli.address).await?;
             let endpoint = endpoint_builder.bind().await?;
 
             tracing::info!(
@@ -218,12 +200,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Mode::Connect { to } => {
-            let addr = match cli.ipv6 {
-                true => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                false => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            };
-            let udp_listener = UdpSocket::bind(SocketAddr::new(addr, cli.port)).await?;
-            let tcp_listener = TcpListener::bind(SocketAddr::new(addr, cli.port)).await?;
+            let udp_listener = UdpSocket::bind(cli.address).await?;
+            let tcp_listener = TcpListener::bind(cli.address).await?;
             let endpoint = endpoint_builder.bind().await?;
             let endpoint_clone = endpoint.clone();
 
@@ -263,11 +241,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Mode::Web => {
-            let addr = match cli.ipv6 {
-                true => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                false => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            };
-            let listener = TcpListener::bind(SocketAddr::new(addr, cli.port)).await?;
+            let listener = TcpListener::bind(cli.address).await?;
             let endpoint = endpoint_builder.bind().await?;
             proxy::ENDPOINT.set(endpoint).unwrap();
 
@@ -309,9 +283,13 @@ async fn connect_tcp(
     let (mut send, recv) = conn.open_bi().await?;
     send.write_all(proxy::HANDSHAKE).await?;
 
+    tracing::info!("opened stream");
+
     let mut stream = quinn_endpoint::QuinnEndpoint { send, recv };
 
     io::copy_bidirectional(&mut local_stream, &mut stream).await?;
+
+    tracing::info!("copied stream");
 
     conn.closed().await;
 
