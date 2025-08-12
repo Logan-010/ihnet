@@ -4,7 +4,7 @@ use cli::{Cli, Mode};
 use hyper::{server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
 use iroh::{Endpoint, NodeId, SecretKey, endpoint::Connection};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use tokio::{
     fs, io, join,
     net::{TcpListener, TcpStream, UdpSocket},
@@ -67,6 +67,13 @@ async fn main() -> anyhow::Result<()> {
             while let Some(connecting) = endpoint.accept().await {
                 tracing::info!("peer connecting");
                 if let Ok(conn) = connecting.await {
+                    tracing::info!(
+                        "peer {} connected",
+                        conn.remote_node_id()
+                            .map(|n| n.to_string())
+                            .unwrap_or(String::from("?"))
+                    );
+
                     let Some(alpn) = conn.alpn() else {
                         tracing::warn!("expected alpn");
                         continue;
@@ -99,6 +106,13 @@ async fn main() -> anyhow::Result<()> {
             while let Some(connecting) = endpoint.accept().await {
                 tracing::info!("peer connecting");
                 if let Ok(conn) = connecting.await {
+                    tracing::info!(
+                        "peer {} connected",
+                        conn.remote_node_id()
+                            .map(|n| n.to_string())
+                            .unwrap_or(String::from("?"))
+                    );
+
                     let Some(alpn) = conn.alpn() else {
                         tracing::warn!("expected alpn");
                         continue;
@@ -106,7 +120,7 @@ async fn main() -> anyhow::Result<()> {
 
                     if alpn == proxy::UDP_ALPN {
                         task::spawn(async move {
-                            if let Err(e) = forward_udp(conn, cli.address, addr).await {
+                            if let Err(e) = forward_udp(conn, addr).await {
                                 tracing::warn!("failed to serve connection: {}", e);
                             } else {
                                 tracing::info!("served connection");
@@ -131,12 +145,20 @@ async fn main() -> anyhow::Result<()> {
             while let Some(connecting) = endpoint.accept().await {
                 tracing::info!("peer connecting");
                 if let Ok(conn) = connecting.await {
+                    tracing::info!(
+                        "peer {} connected",
+                        conn.remote_node_id()
+                            .map(|n| n.to_string())
+                            .unwrap_or(String::from("?"))
+                    );
+
                     let Some(alpn) = conn.alpn() else {
                         tracing::warn!("expected alpn");
                         continue;
                     };
 
                     if alpn == proxy::TCP_ALPN {
+                        tracing::info!("forwarding tcp peer");
                         task::spawn(async move {
                             if let Err(e) = forward_tcp(conn, addr).await {
                                 tracing::warn!("failed to serve connection: {}", e);
@@ -145,8 +167,9 @@ async fn main() -> anyhow::Result<()> {
                             }
                         });
                     } else if alpn == proxy::UDP_ALPN {
+                        tracing::info!("forwarding udp peer");
                         task::spawn(async move {
-                            if let Err(e) = forward_udp(conn, cli.address, addr).await {
+                            if let Err(e) = forward_udp(conn, addr).await {
                                 tracing::warn!("failed to serve connection: {}", e);
                             } else {
                                 tracing::info!("served connection");
@@ -206,7 +229,7 @@ async fn main() -> anyhow::Result<()> {
             let endpoint_clone = endpoint.clone();
 
             tracing::info!(
-                "listening for tcp connection on {}, and udp connections on {}",
+                "listening for tcp connections on {}, and udp connections on {}",
                 tcp_listener.local_addr()?,
                 udp_listener.local_addr()?
             );
@@ -335,11 +358,7 @@ async fn forward_tcp(conn: Connection, addr: SocketAddr) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn forward_udp(
-    conn: Connection,
-    listen_addr: SocketAddr,
-    addr: SocketAddr,
-) -> anyhow::Result<()> {
+async fn forward_udp(conn: Connection, addr: SocketAddr) -> anyhow::Result<()> {
     let (mut send, mut recv) = conn.accept_bi().await?;
 
     let mut handshake = [0u8; proxy::HANDSHAKE.len()];
@@ -350,7 +369,11 @@ async fn forward_udp(
     }
 
     let mut buf = [0u8; 1500];
-    let socket = UdpSocket::bind(listen_addr).await?;
+    let bind_addr = match addr.is_ipv6() {
+        true => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        false => IpAddr::V4(Ipv4Addr::LOCALHOST),
+    };
+    let socket = UdpSocket::bind(SocketAddr::new(bind_addr, 0)).await?;
     socket.connect(addr).await?;
 
     loop {
